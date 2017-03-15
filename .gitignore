@@ -1,0 +1,11 @@
+*.iml
+*.class
+target
+logs
+.svn
+.idea
+.settings
+.project
+	
+.classpath
+*.scssc
