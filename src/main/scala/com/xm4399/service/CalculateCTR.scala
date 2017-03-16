@@ -12,6 +12,7 @@ object CalculateCTR {
   def main(args: Array[String]): Unit = {
     val spark = SparkSession
       .builder()
+      .config("spark.hadoop.validateOutputSpecs", "false")
       .master("local")
       .getOrCreate()
 
@@ -38,6 +39,19 @@ object CalculateCTR {
     val (afterNumShow, afterNumClick, afterNumRemain) = InfoUtil.info(relevanceRDD)
     println(s"关联前展示量${beforeNumShow}, 点击量${beforeNumClick}, 留存量${beforeNumRemain}")
     println(s"关联后展示量${afterNumShow}, 点击量${afterNumClick}, 留存量${afterNumRemain}")
+    relevanceRDD.map(tuple => {
+      val (searchTerm, gameId, numShow, numClick, numRemain) = (tuple._2, tuple._4, tuple._5, tuple._6, tuple._7)
+      ((searchTerm, gameId), (numShow, numClick, numRemain))
+    }).reduceByKey((v1, v2) => (v1._1 + v2._1, v1._2 + v2._2, v1._3 + v2._3))
+      .sortBy(tuple => {
+        val value = tuple._2
+        val numShow = value._1
+        numShow
+      }, ascending = false).map(tuple => {
+      val ((searchTerm, gameId), (numShow, numClick, numRemain)) = tuple
+      val line = s"$searchTerm\t$gameId\t$numShow\t$numClick\t$numRemain"
+      line
+    }).saveAsTextFile(outputPath)
   }
 
   //封装成Session对象
