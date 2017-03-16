@@ -10,6 +10,8 @@ class Game(pGameId: Int, pClick: Int, pRemain: Int) extends Serializable{
   val click: Boolean = if(0 == pClick) false else true
   val remain: Boolean = if(0 == pRemain) false else true
 
+  def isClick: Boolean = click
+
 
   def canEqual(other: Any): Boolean = other.isInstanceOf[Game]
 
