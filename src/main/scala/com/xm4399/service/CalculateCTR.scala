@@ -27,12 +27,17 @@ object CalculateCTR {
     //取出需要的6个字段
     val rowDF = spark.sql("select sessionid, query, timestamp, gameid, isclick, isremain from t_show_click")
     //打印关联前的展示量、点击量、留存量
-    val (numShow, numClick, numRemain) = InfoUtil.info(rowDF)
-    println(s"展示量${numShow}, 点击量${numClick}, 留存量${numRemain}")
+    val (beforeNumShow, beforeNumClick, beforeNumRemain) = InfoUtil.info(rowDF)
     //封装成Session对象
     val sessionRDD = toSessionRDD(rowDF)
     //关联查询
     val relevancedSessionRDD = sessionRDD.map(session => session.relevanceQuery)
+    //解封装Session
+    val relevanceRDD = relevancedSessionRDD.flatMap(session => session.unbox)
+    //打印关联后的展示量、点击量、留存量
+    val (afterNumShow, afterNumClick, afterNumRemain) = InfoUtil.info(relevanceRDD)
+    println(s"关联前展示量${beforeNumShow}, 点击量${beforeNumClick}, 留存量${beforeNumRemain}")
+    println(s"关联后展示量${afterNumShow}, 点击量${afterNumClick}, 留存量${afterNumRemain}")
   }
 
   //封装成Session对象

@@ -50,9 +50,9 @@ object Query{
     val (sessionId, searchTerm, timeStamp) = tuple._1
     val gameIter = tuple._2
     val query = new Query(searchTerm, timeStamp)
-    val games = mutable.Set[Game]()
+    query.games = mutable.Set[Game]()
     for(game <- gameIter){
-      games += game
+      query.games += game
       if(game.isClick) query.click = true
     }
     (sessionId, query)

@@ -21,7 +21,7 @@ object InfoUtil {
   //用于展示关联后的展示量、点击量、留存度的信息
   def info(rdd: RDD[(String, String, Long, Int, Int, Int, Int)]): (Long, Long, Long) = {
     rdd.map(tuple => {
-      val (numShow, click, remain) = (tuple._4.toLong, tuple._5.toLong, tuple._6.toLong)
+      val (numShow, click, remain) = (tuple._5.toLong, tuple._6.toLong, tuple._7.toLong)
       (numShow, click, remain)
     }).reduce((t1, t2) =>{
       (t1._1 + t2._1, t1._2 + t2._2, t1._3 + t2._3)
