@@ -1,4 +1,4 @@
-package service
+package com.xm4399.service
 
 import com.xm4399.model.{Game, Query, Session}
 import com.xm4399.util.InfoUtil
