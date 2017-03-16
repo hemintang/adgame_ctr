@@ -17,6 +17,7 @@ object CalculateCTR {
 
     val inputPath = "/home/hemintang/input/part-00000"
     val outputPath = "/home/hemintang/output/ctr"
+
     run(spark, inputPath, outputPath)
   }
 
@@ -30,6 +31,8 @@ object CalculateCTR {
     println(s"展示量${numShow}, 点击量${numClick}, 留存量${numRemain}")
     //封装成Session对象
     val sessionRDD = toSessionRDD(rowDF)
+    //关联查询
+    val relevancedSessionRDD = sessionRDD.map(session => session.relevanceQuery)
   }
 
   //封装成Session对象
