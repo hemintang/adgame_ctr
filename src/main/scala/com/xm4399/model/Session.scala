@@ -8,6 +8,19 @@ class Session(pSessionId: String, pQuerys: List[Query]) extends Serializable{
   val sessionId: String = pSessionId
   val querys: List[Query] = pQuerys
 
+  //session中的query进行关联
+  def relevanceQuery: Session = {
+    for(index <- 1 until querys.size){
+      val query = querys(index)
+      //如果没有被点击，则和下一个时间戳的query关联
+      if(!query.isClick){
+        val lastQuery = querys(index - 1)
+        query.relevance(lastQuery)
+      }
+    }
+    this
+  }
+
 
   def canEqual(other: Any): Boolean = other.isInstanceOf[Session]
 
