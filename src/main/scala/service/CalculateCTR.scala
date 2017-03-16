@@ -1,6 +1,7 @@
 package service
 
 import com.xm4399.model.{Game, Query, Session}
+import com.xm4399.util.InfoUtil
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{DataFrame, SparkSession}
 
@@ -24,9 +25,11 @@ object CalculateCTR {
     spark.read.orc(inputPath).createOrReplaceTempView("t_show_click")
     //取出需要的6个字段
     val rowDF = spark.sql("select sessionid, query, timestamp, gameid, isclick, isremain from t_show_click")
+    //打印关联前的展示量、点击量、留存量
+    val (numShow, numClick, numRemain) = InfoUtil.info(rowDF)
+    println(s"展示量${numShow}, 点击量${numClick}, 留存量${numRemain}")
     //封装成Session对象
     val sessionRDD = toSessionRDD(rowDF)
-    sessionRDD.take(3).foreach(session => println(session.sessionId))
   }
 
   //封装成Session对象
