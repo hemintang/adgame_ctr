@@ -1,7 +1,6 @@
 package com.xm4399.service
 
 import com.xm4399.model.{Game, Query, Session}
-import com.xm4399.util.InfoUtil
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{DataFrame, SparkSession}
 
@@ -9,49 +8,51 @@ import org.apache.spark.sql.{DataFrame, SparkSession}
   * Created by hemintang on 17-3-15.
   */
 object CalculateCTR {
+
+//  val INPUTBASEPATH = "hdfs:////hive/warehouse/datamarket/adgame/reality_search_show/datekey="
+//  val OUTPUTBASEPATH = "hdfs:///user/hemintang/output/"
+
+  val spark: SparkSession = SparkSession
+    .builder()
+    .config("spark.hadoop.validateOutputSpecs", "false")
+    .master("local")
+    .getOrCreate()
+
+  import spark.implicits._
+
   def main(args: Array[String]): Unit = {
-    val spark = SparkSession
-      .builder()
-      .config("spark.hadoop.validateOutputSpecs", "false")
-      .master("local")
-      .getOrCreate()
+
+//    val daysAgo = args(0).toInt
+//    val dateKey = DateKeyUtil.getDatekey(daysAgo) //取到输入的日期如，20170303
 
     val inputPath = "/home/hemintang/input/part-00000"
     val outputPath = "/home/hemintang/output/ctr"
-
-    run(spark, inputPath, outputPath)
+//    val inputPath = INPUTBASEPATH + dateKey
+//    val outputPath = OUTPUTBASEPATH + "ctr"
+    run(inputPath, outputPath)
   }
 
-  def run(spark: SparkSession, inputPath: String, outputPath: String): Unit ={
+  def run(inputPath: String, outputPath: String): Unit ={
     //加载数据，创建概念表t_show_click
     spark.read.orc(inputPath).createOrReplaceTempView("t_show_click")
     //取出需要的6个字段
     val rowDF = spark.sql("select sessionid, query, timestamp, gameid, isclick, isremain from t_show_click")
-    //打印关联前的展示量、点击量、留存量
-    val (beforeNumShow, beforeNumClick, beforeNumRemain) = InfoUtil.info(rowDF)
     //封装成Session对象
     val sessionRDD = toSessionRDD(rowDF)
     //关联查询
     val relevancedSessionRDD = sessionRDD.map(session => session.relevanceQuery)
     //解封装Session
-    val relevanceRDD = relevancedSessionRDD.flatMap(session => session.unbox)
+    val relevanceDF = relevancedSessionRDD.flatMap(session => session.unbox).toDF("sessionId", "searchTerm", "timeStamp", "gameId", "show", "click", "remain")
     //打印关联后的展示量、点击量、留存量
-    val (afterNumShow, afterNumClick, afterNumRemain) = InfoUtil.info(relevanceRDD)
-    println(s"关联前展示量${beforeNumShow}, 点击量${beforeNumClick}, 留存量${beforeNumRemain}")
-    println(s"关联后展示量${afterNumShow}, 点击量${afterNumClick}, 留存量${afterNumRemain}")
-    relevanceRDD.map(tuple => {
-      val (searchTerm, gameId, numShow, numClick, numRemain) = (tuple._2, tuple._4, tuple._5, tuple._6, tuple._7)
-      ((searchTerm, gameId), (numShow, numClick, numRemain))
-    }).reduceByKey((v1, v2) => (v1._1 + v2._1, v1._2 + v2._2, v1._3 + v2._3))
-      .sortBy(tuple => {
-        val value = tuple._2
-        val numShow = value._1
-        numShow
-      }, ascending = false).map(tuple => {
-      val ((searchTerm, gameId), (numShow, numClick, numRemain)) = tuple
-      val line = s"$searchTerm\t$gameId\t$numShow\t$numClick\t$numRemain"
-      line
-    }).saveAsTextFile(outputPath)
+//    val rowInfo = rowDF.agg("*" -> "count", "isclick" -> "sum", "isremain" -> "sum").toDF("numShow", "numClick", "numRemain")
+//    val relevancedInfo = relevanceDF.agg("show" -> "sum", "click" -> "sum", "remain" -> "sum").toDF("numShow", "numClick", "numRemain")
+//    rowInfo.union(relevancedInfo).show()
+
+    relevanceDF.groupBy("searchTerm", "gameId").agg("show" -> "sum", "click" -> "sum", "remain" -> "sum")
+      .toDF("searchTerm", "gameId", "numShow", "numClick", "numRemain")
+      .sort(-$"numShow")
+      .write
+      .orc(outputPath)
   }
 
   //封装成Session对象
