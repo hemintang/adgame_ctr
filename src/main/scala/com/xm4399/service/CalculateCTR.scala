@@ -1,6 +1,7 @@
 package com.xm4399.service
 
 import com.xm4399.model.{Game, Query, Session}
+import com.xm4399.util.DateKeyUtil
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{DataFrame, SparkSession}
 
@@ -9,26 +10,26 @@ import org.apache.spark.sql.{DataFrame, SparkSession}
   */
 object CalculateCTR {
 
-//  val INPUTBASEPATH = "hdfs:////hive/warehouse/datamarket/adgame/reality_search_show/datekey="
-//  val OUTPUTBASEPATH = "hdfs:///user/hemintang/output/"
+  val INPUTBASEPATH = "hdfs:////hive/warehouse/datamarket/adgame/reality_search_show/datekey="
+  val OUTPUTBASEPATH = "hdfs:///user/hemintang/output/"
 
   val spark: SparkSession = SparkSession
     .builder()
     .config("spark.hadoop.validateOutputSpecs", "false")
-    .master("local")
+//    .master("local")
     .getOrCreate()
 
   import spark.implicits._
 
   def main(args: Array[String]): Unit = {
 
-//    val daysAgo = args(0).toInt
-//    val dateKey = DateKeyUtil.getDatekey(daysAgo) //取到输入的日期如，20170303
+    val daysAgo = args(0).toInt
+    val dateKey = DateKeyUtil.getDatekey(daysAgo) //取到输入的日期如，20170303
 
-    val inputPath = "/home/hemintang/input/part-00000"
-    val outputPath = "/home/hemintang/output/ctr"
-//    val inputPath = INPUTBASEPATH + dateKey
-//    val outputPath = OUTPUTBASEPATH + "ctr"
+//    val inputPath = "/home/hemintang/input/part-00000"
+//    val outputPath = "/home/hemintang/output/ctr"
+    val inputPath = INPUTBASEPATH + dateKey
+    val outputPath = OUTPUTBASEPATH + "ctr"
     run(inputPath, outputPath)
   }
 
@@ -50,7 +51,6 @@ object CalculateCTR {
 
     relevanceDF.groupBy("searchTerm", "gameId").agg("show" -> "sum", "click" -> "sum", "remain" -> "sum")
       .toDF("searchTerm", "gameId", "numShow", "numClick", "numRemain")
-      .sort(-$"numShow")
       .write
       .orc(outputPath)
   }
