@@ -46,8 +46,8 @@ class Query(pSearchTerm: String, pTimeStamp: Long) extends Serializable{
 
 object Query{
   //封装成Query对象
-  def box(tuple: ((String, String, Long), Iterable[Game])): (String, Query) = {
-    val (sessionId, searchTerm, timeStamp) = tuple._1
+  def box(tuple: ((String, String, String, Long), Iterable[Game])): ((String, String), Query) = {
+    val (udId, sessionId, searchTerm, timeStamp) = tuple._1
     val gameIter = tuple._2
     val query = new Query(searchTerm, timeStamp)
     query.games = mutable.Set[Game]()
@@ -55,6 +55,6 @@ object Query{
       query.games += game
       if(game.isClick) query.click = true
     }
-    (sessionId, query)
+    ((udId, sessionId), query)
   }
 }
