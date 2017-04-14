@@ -1,22 +1,25 @@
 package com.xm4399.service
 
+import com.xm4399.enumeration.{Table, HTable}
 import com.xm4399.model.{Game, Query, Session}
 import com.xm4399.util.DateKeyUtil
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{DataFrame, SparkSession}
-
+import org.apache.spark.sql.functions.lit
 /**
   * Created by hemintang on 17-3-15.
+  * 增量式子CTR计算
   */
-object CalculateCTR {
+object CalculateCTR extends Serializable{
 
-  val INPUTBASEPATH = "hdfs:////hive/warehouse/datamarket/adgame/reality_search_show/datekey="
-  val OUTPUTBASEPATH = "hdfs:///user/hemintang/output/"
-
+  //展示量的阙值
+  val NUMSHOWTHRESHOLD: Double = 10000d
+  //计算的是哪天的数据
+  var dateKey: String = _
   val spark: SparkSession = SparkSession
     .builder()
     .config("spark.hadoop.validateOutputSpecs", "false")
-//    .master("local")
+    .enableHiveSupport()
     .getOrCreate()
 
   import spark.implicits._
@@ -24,48 +27,92 @@ object CalculateCTR {
   def main(args: Array[String]): Unit = {
 
     val daysAgo = args(0).toInt
-    val dateKey = DateKeyUtil.getDatekey(daysAgo) //取到输入的日期如，20170303
+    dateKey = DateKeyUtil.getDatekey(daysAgo) //取到输入的日期如，20170303
 
-//    val inputPath = "/home/hemintang/input/part-00000"
-//    val outputPath = "/home/hemintang/output/ctr"
-    val inputPath = INPUTBASEPATH + dateKey
-    val outputPath = OUTPUTBASEPATH + "ctr"
-    run(inputPath, outputPath)
+    //计算某一天的ctr
+    CalculateCTR.oneDayCTR(false)
+    //防止容错机制多次重算，所以直接从hive表里取
+    val oneDayCTR = loadDFFromHive(Table.T_adgame_ctr, dateKey, "searchterm, gameid, numshow, numclick, numremain")
+    //取到前一天的汇总ctr
+    val sumDateKey = DateKeyUtil.getDatekey(daysAgo + 1)
+    //加载前一天汇总的ctr
+    val sumCTRDF: DataFrame = loadDFFromHive(Table.T_adgame_ctr, s"sum_$sumDateKey", "searchterm, gameid, numshow, numclick, numremain")
+    //将某天的ctr和前一天的汇总合并
+    val newSumCTRDF = mergeCTR(sumCTRDF, oneDayCTR)
+    //将新汇总的ctr存进hive表
+    saveDF(newSumCTRDF, Table.T_adgame_ctr, s"sum_$dateKey")
+//    saveSumCTRDF(newSumCTRDF, dateKey)
   }
 
-  def run(inputPath: String, outputPath: String): Unit ={
-    //加载数据，创建概念表t_show_click
-    spark.read.orc(inputPath).createOrReplaceTempView("t_show_click")
-    //取出需要的6个字段
-    val rowDF = spark.sql("select sessionid, query, timestamp, gameid, isclick, isremain from t_show_click")
+  //将DataFrame存进hive表中
+  def saveDF(df: DataFrame, tableDesc: HTable, partitionName: String): Unit ={
+    df.createOrReplaceTempView("t_df")
+    spark.sql(s"use ${tableDesc.databaseName}")
+    spark.sql(
+      s"""
+         |insert into table ${tableDesc.tableName}
+         |partition (${tableDesc.partitionQualifier} = '$partitionName')
+         |select * from t_df
+       """.stripMargin)
+  }
+
+  //汇总ctr
+  def mergeCTR(beformCTRDF: DataFrame, oneCTRDF: DataFrame): DataFrame = {
+    val unionedDF = beformCTRDF.union(oneCTRDF).groupBy("searchterm", "gameid").agg("numshow" -> "sum", "numclick" -> "sum", "numremain" -> "sum")
+      .toDF("searchTerm", "gameId", "numShow", "numClick", "numRemain")
+    //策略：展示量不超过10000
+    val overDF = unionedDF.where(s"numShow > $NUMSHOWTHRESHOLD")
+    val unOverDF = unionedDF.where(s"numshow <= $NUMSHOWTHRESHOLD")
+    val detailOverDF = overDF.withColumn("newNumShow", lit(NUMSHOWTHRESHOLD))
+      .withColumn("newNumClick", $"numClick" / $"numShow" * NUMSHOWTHRESHOLD)
+      .withColumn("newNumRemain", $"numRemain" / $"numShow")
+      .select("searchTerm", "gameId", "newNumShow", "newNumClick", "newNumRemain").toDF("searchTerm", "gameId", "numShow", "numClick", "numRemain")
+
+    detailOverDF.union(unOverDF)
+  }
+  //从hive表中加载数据
+  def loadDFFromHive(tableDesc: HTable, partitionName: String, columns: String): DataFrame = {
+    spark.sql(s"use ${tableDesc.databaseName}")
+    spark.sql(
+      s"""
+         |select $columns from ${tableDesc.tableName}
+         |where datekey = '$partitionName'
+       """.stripMargin)
+  }
+
+  //计算一天的数据
+  def oneDayCTR(saveMidRes: Boolean): DataFrame ={
+    //加载数据，取出需要的7个字段
+    val rowDF = loadDFFromHive(Table.Reality_search_show, dateKey, "udid, sessionid, query, timestamp, gameid, isclick, isremain")
     //封装成Session对象
     val sessionRDD = toSessionRDD(rowDF)
     //关联查询
     val relevancedSessionRDD = sessionRDD.map(session => session.relevanceQuery)
     //解封装Session
-    val relevanceDF = relevancedSessionRDD.flatMap(session => session.unbox).toDF("sessionId", "searchTerm", "timeStamp", "gameId", "show", "click", "remain")
-    //打印关联后的展示量、点击量、留存量
-//    val rowInfo = rowDF.agg("*" -> "count", "isclick" -> "sum", "isremain" -> "sum").toDF("numShow", "numClick", "numRemain")
-//    val relevancedInfo = relevanceDF.agg("show" -> "sum", "click" -> "sum", "remain" -> "sum").toDF("numShow", "numClick", "numRemain")
-//    rowInfo.union(relevancedInfo).show()
-
-    relevanceDF.groupBy("searchTerm", "gameId").agg("show" -> "sum", "click" -> "sum", "remain" -> "sum")
+    val ctrMidDF = relevancedSessionRDD.flatMap(session => session.unbox).toDF("udId", "sessionId", "searchTerm", "queryTimeStamp", "gameId", "numShow", "numClick", "numRemain")
+    //保存中间结果
+    if(saveMidRes){
+      saveDF(ctrMidDF, Table.T_adgame_ctr_midres, dateKey)
+    }
+    //聚合展示量的、点击量、留存量
+    val ctrDF = ctrMidDF.groupBy("searchTerm", "gameId").agg("numShow" -> "sum", "numClick" -> "sum", "numRemain" -> "sum")
       .toDF("searchTerm", "gameId", "numShow", "numClick", "numRemain")
-      .write
-      .orc(outputPath)
+    saveDF(ctrDF, Table.T_adgame_ctr, dateKey)
+    ctrDF
   }
 
   //封装成Session对象
   private def toSessionRDD(rowDF: DataFrame): RDD[Session] = {
     //封装成Game对象
     val gameRDD = rowDF.rdd.map(row =>{
+      val udId = row.getAs[String]("udid")
       val sessionId = row.getAs[String]("sessionid")
       val searchTerm = row.getAs[String]("query")
       val timeStamp = row.getAs[String]("timestamp").toLong
       val gameId = row.getAs[Int]("gameid")
       val click = row.getAs[Int]("isclick")
       val remain = row.getAs[Int]("isremain")
-      ((sessionId, searchTerm, timeStamp), new Game(gameId, click, remain))
+      ((udId, sessionId, searchTerm, timeStamp), new Game(gameId, click, remain))
     })
     //封装成Query对象
     val queryRDD = gameRDD.groupByKey.map(Query.box)
