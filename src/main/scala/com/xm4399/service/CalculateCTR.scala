@@ -16,6 +16,8 @@ object CalculateCTR extends Serializable{
   val NUMSHOWTHRESHOLD: Double = 10000d
   //计算的是哪天的数据
   var dateKey: String = _
+  //数据库
+  var databaseName: String = _
   val spark: SparkSession = SparkSession
     .builder()
     .config("spark.hadoop.validateOutputSpecs", "false")
@@ -26,13 +28,21 @@ object CalculateCTR extends Serializable{
 
   def main(args: Array[String]): Unit = {
 
-    val daysAgo = args(0).toInt
-    dateKey = DateKeyUtil.getDatekey(daysAgo) //取到输入的日期如，20170303
+    if(2 == args.length){
+      val daysAgo = args(0).toInt
+      CalculateCTR.databaseName = args(1)
+      CalculateCTR.dateKey = DateKeyUtil.getDatekey(daysAgo) //取到输入的日期如，20170303
+      run(daysAgo)
+    }
 
-    //计算某一天的ctr
-    CalculateCTR.oneDayCTR(false)
+  }
+
+  def run(daysAgo: Int): Unit ={
+
+    //计算某一天的ctr, true表示保存中间计算结果
+    val oneDayCTR = CalculateCTR.oneDayCTR(true)
     //防止容错机制多次重算，所以直接从hive表里取
-    val oneDayCTR = loadDFFromHive(Table.T_adgame_ctr, dateKey, "searchterm, gameid, numshow, numclick, numremain")
+    //    val oneDayCTR = loadDFFromHive(Table.T_adgame_ctr, dateKey, "searchterm, gameid, numshow, numclick, numremain")
     //取到前一天的汇总ctr
     val sumDateKey = DateKeyUtil.getDatekey(daysAgo + 1)
     //加载前一天汇总的ctr
@@ -41,16 +51,15 @@ object CalculateCTR extends Serializable{
     val newSumCTRDF = mergeCTR(sumCTRDF, oneDayCTR)
     //将新汇总的ctr存进hive表
     saveDF(newSumCTRDF, Table.T_adgame_ctr, s"sum_$dateKey")
-//    saveSumCTRDF(newSumCTRDF, dateKey)
   }
 
   //将DataFrame存进hive表中
   def saveDF(df: DataFrame, tableDesc: HTable, partitionName: String): Unit ={
     df.createOrReplaceTempView("t_df")
-    spark.sql(s"use ${tableDesc.databaseName}")
+    spark.sql(s"use ${CalculateCTR.databaseName}")
     spark.sql(
       s"""
-         |insert into table ${tableDesc.tableName}
+         |insert overwrite table ${tableDesc.tableName}
          |partition (${tableDesc.partitionQualifier} = '$partitionName')
          |select * from t_df
        """.stripMargin)
@@ -71,11 +80,10 @@ object CalculateCTR extends Serializable{
     detailOverDF.union(unOverDF)
   }
   //从hive表中加载数据
-  def loadDFFromHive(tableDesc: HTable, partitionName: String, columns: String): DataFrame = {
-    spark.sql(s"use ${tableDesc.databaseName}")
+  def loadDFFromHive(tableDesc: HTable, partitionName: String, columns: String, databaseName: String = "default"): DataFrame = {
     spark.sql(
       s"""
-         |select $columns from ${tableDesc.tableName}
+         |select $columns from $databaseName.${tableDesc.tableName}
          |where datekey = '$partitionName'
        """.stripMargin)
   }
@@ -83,7 +91,7 @@ object CalculateCTR extends Serializable{
   //计算一天的数据
   def oneDayCTR(saveMidRes: Boolean): DataFrame ={
     //加载数据，取出需要的7个字段
-    val rowDF = loadDFFromHive(Table.Reality_search_show, dateKey, "udid, sessionid, query, timestamp, gameid, isclick, isremain")
+    val rowDF = loadDFFromHive(Table.Reality_search_show, dateKey, "udid, sessionid, query, timestamp, gameid, isclick, isremain", "datamarket_adgame")
     //封装成Session对象
     val sessionRDD = toSessionRDD(rowDF)
     //关联查询
