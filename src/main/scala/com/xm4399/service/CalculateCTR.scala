@@ -40,9 +40,9 @@ object CalculateCTR extends Serializable{
   def run(daysAgo: Int): Unit ={
 
     //计算某一天的ctr, true表示保存中间计算结果
-    val oneDayCTR = CalculateCTR.oneDayCTR(true)
+    CalculateCTR.oneDayCTR(true)
     //防止容错机制多次重算，所以直接从hive表里取
-    //    val oneDayCTR = loadDFFromHive(Table.T_adgame_ctr, dateKey, "searchterm, gameid, numshow, numclick, numremain")
+    val oneDayCTR = loadDFFromHive(Table.T_adgame_ctr, dateKey, "searchterm, gameid, numshow, numclick, numremain")
     //取到前一天的汇总ctr
     val sumDateKey = DateKeyUtil.getDatekey(daysAgo + 1)
     //加载前一天汇总的ctr
@@ -71,12 +71,11 @@ object CalculateCTR extends Serializable{
       .toDF("searchTerm", "gameId", "numShow", "numClick", "numRemain")
     //策略：展示量不超过10000
     val overDF = unionedDF.where(s"numShow > $NUMSHOWTHRESHOLD")
-    val unOverDF = unionedDF.where(s"numshow <= $NUMSHOWTHRESHOLD")
+    val unOverDF = unionedDF.where(s"numShow <= $NUMSHOWTHRESHOLD")
     val detailOverDF = overDF.withColumn("newNumShow", lit(NUMSHOWTHRESHOLD))
       .withColumn("newNumClick", $"numClick" / $"numShow" * NUMSHOWTHRESHOLD)
       .withColumn("newNumRemain", $"numRemain" / $"numShow")
       .select("searchTerm", "gameId", "newNumShow", "newNumClick", "newNumRemain").toDF("searchTerm", "gameId", "numShow", "numClick", "numRemain")
-
     detailOverDF.union(unOverDF)
   }
   //从hive表中加载数据
@@ -100,12 +99,12 @@ object CalculateCTR extends Serializable{
     val ctrMidDF = relevancedSessionRDD.flatMap(session => session.unbox).toDF("udId", "sessionId", "searchTerm", "queryTimeStamp", "gameId", "numShow", "numClick", "numRemain")
     //保存中间结果
     if(saveMidRes){
-      saveDF(ctrMidDF, Table.T_adgame_ctr_midres, dateKey)
+      saveDF(ctrMidDF.repartition(5), Table.T_adgame_ctr_midres, dateKey)
     }
     //聚合展示量的、点击量、留存量
     val ctrDF = ctrMidDF.groupBy("searchTerm", "gameId").agg("numShow" -> "sum", "numClick" -> "sum", "numRemain" -> "sum")
       .toDF("searchTerm", "gameId", "numShow", "numClick", "numRemain")
-    saveDF(ctrDF, Table.T_adgame_ctr, dateKey)
+    saveDF(ctrDF.repartition(3), Table.T_adgame_ctr, dateKey)
     ctrDF
   }
 
