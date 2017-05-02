@@ -1,6 +1,6 @@
-package com.xm4399.adgame.anticheat.util
+package com.xm4399.util
 
-import redis.clients.jedis.{JedisPoolConfig, JedisShardInfo, ShardedJedis, ShardedJedisPool}
+import redis.clients.jedis.{JedisPoolConfig, JedisShardInfo, ShardedJedisPool}
 import redis.clients.util.{Hashing, Sharded}
 
 object RedisClient extends Serializable {
@@ -11,7 +11,7 @@ object RedisClient extends Serializable {
   config.setMaxIdle(50)
   config.setMaxWaitMillis(30000)
   config.setTestOnBorrow(true)
-  val redisAddrs = "10.0.0.94:6395;10.0.0.94:6396;10.0.0.94:6397".split(";")
+  val redisAddrs = "10.0.0.92:6380".split(";")
   //val redisAddrs = "127.0.0.1:6379;127.0.0.1:6379".split(";")
 
   val redisAddrPorts = Array.ofDim[String](redisAddrs.length, 2)
@@ -35,28 +35,5 @@ object RedisClient extends Serializable {
   }
   sys.addShutdownHook(hook.run())
 
-  /**
-    * 清空库
-    */
-  def flushDB = {
-
-    val ports = Array("6395","6396","6397")
-    ports.foreach(port => {
-      RedisUtils.setMaxWait(-1)
-      RedisUtils.getJedis(port.toInt).flushDB()
-    })
-  }
-
-
-  def main(args: Array[String]): Unit = {
-    val jedis = RedisClient.pool.getResource
-
-
-    val pipeline = jedis.pipelined()
-
-    pipeline.set("xiaozhang", "redis test")
-
-    jedis.close()
-  }
 
 }
